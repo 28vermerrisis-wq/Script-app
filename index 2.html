@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Script Rehearsal</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f7;
+            color: #1d1d1f;
+        }
+        h1, h2 { text-align: center; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        textarea { width: 100%; height: 150px; border-radius: 8px; border: 1px solid #ccc; padding: 10px; box-sizing: border-box; font-size: 16px; }
+        button { width: 100%; padding: 12px; background-color: #007aff; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; margin-top: 10px; cursor: pointer; }
+        button:disabled { background-color: #99ccff; }
+        select { width: 100%; padding: 12px; border-radius: 8px; font-size: 16px; margin-top: 10px; }
+        .box { margin-top: 20px; padding: 15px; border-radius: 8px; background: #f0f0f2; min-height: 50px; text-align: center; }
+        #status { font-weight: bold; color: #007aff; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Line Reader App</h1>
+    
+    <div id="setup-section">
+        <h3>Paste Your Script Here:</h3>
+        <p style="font-size: 12px; color: #666;">Format: CHARACTER: Their line (One per line)</p>
+        <textarea id="scriptInput">DETECTIVE: Where were you on the night of the 14th?
+SUSPECT: I was at home watching television.
+DETECTIVE: That is funny because your neighbors heard a struggle.
+SUSPECT: They must be lying I was alone.</textarea>
+        <button id="loadBtn">Load Script & Find Characters</button>
+        
+        <div id="charSelectContainer" style="display:none;">
+            <h3>Select YOUR Character:</h3>
+            <select id="charSelect"></select>
+            <button id="startBtn">Start Rehearsal</button>
+        </div>
+    </div>
+
+    <div id="rehearsal-section" style="display:none;">
+        <h2 id="roleTitle">Playing: </h2>
+        <div class="box">
+            <strong id="speakerName">Speaker:</strong>
+            <p id="lineDisplay">Press start to begin...</p>
+        </div>
+        <div id="status">Ready</div>
+        <button id="quitBtn" style="background-color: #ff3b30;">Quit Rehearsal</button>
+    </div>
+</div>
+
+<script>
+    let scriptLines = [];
+    let currentLineIndex = 0;
+    let myCharacter = "";
+    
+    // Check for iOS Safari Speech Recognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+    if (recognition) {
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+    }
+
+    // Load saved script on startup
+    if (localStorage.getItem('savedScript')) {
+        document.getElementById('scriptInput').value = localStorage.getItem('savedScript');
+    }
+
+    // Step 1: Parse the script text to find characters
+    document.getElementById('loadBtn').addEventListener('click', () => {
+        const text = document.getElementById('scriptInput').value;
+        localStorage.setItem('savedScript', text); // Save to phone local storage
+        
+        const lines = text.split('\n');
+        scriptLines = [];
+        const characters = new Set();
+
+        lines.forEach(line => {
+            if (line.includes(':')) {
+                const parts = line.split(':');
+                const charName = parts[0].trim().toUpperCase();
+                const dialogue = parts.slice(1).join(':').trim();
+                if (charName && dialogue) {
+                    scriptLines.push({ character: charName, line: dialogue });
+                    characters.add(charName);
+                }
+            }
+        });
+
+        if (scriptLines.length === 0) {
+            alert("Could not detect any lines. Make sure you use the 'NAME: Line' format.");
+            return;
+        }
+
+        // Populate Character Dropdown
+        const select = document.getElementById('charSelect');
+        select.innerHTML = '';
+        characters.forEach(char => {
+            const opt = document.createElement('option');
+            opt.value = char;
+            opt.textContent = char;
+            select.appendChild(opt);
+        });
+
+        document.getElementById('charSelectContainer').style.display = 'block';
+    });
+
+    // Step 2: Start Rehearsal
+    document.getElementById('startBtn').addEventListener('click', () => {
+        myCharacter = document.getElementById('charSelect').value;
+        document.getElementById('setup-section').style.display = 'none';
+        document.getElementById('rehearsal-section').style.display = 'block';
+        document.getElementById('roleTitle').textContent = "Playing: " + myCharacter;
+        currentLineIndex = 0;
+        nextLine();
+    });
+
+    document.getElementById('quitBtn').addEventListener('click', () => {
+        window.speechSynthesis.cancel();
+        if (recognition) recognition.abort();
+        document.getElementById('setup-section').style.display = 'block';
+        document.getElementById('rehearsal-section').style.display = 'none';
+    });
+
+    // Step 3: Game Loop
+    function nextLine() {
+        if (currentLineIndex >= scriptLines.length) {
+            document.getElementById('speakerName').textContent = "Scene Complete!";
+            document.getElementById('lineDisplay').textContent = "Great job nailing your lines!";
+            document.getElementById('status').textContent = "Done";
+            return;
+        }
+
+        const currentData = scriptLines[currentLineIndex];
+        
+        if (currentData.character !== myCharacter) {
+            // Scene partner's line -> TTS speaks it
+            document.getElementById('speakerName').textContent = currentData.character;
+            document.getElementById('lineDisplay').textContent = currentData.line;
+            document.getElementById('status').textContent = "Speaking cue...";
+
+            const utterance = new SpeechSynthesisUtterance(currentData.line);
+            utterance.onend = () => {
+                currentLineIndex++;
+                nextLine();
+            };
+            window.speechSynthesis.speak(utterance);
+        } else {
+            // User's line -> App listens
+            document.getElementById('speakerName').textContent = "YOU (" + myCharacter + ")";
+            document.getElementById('lineDisplay').textContent = "(Say your line now)";
+            document.getElementById('status').textContent = "Listening...";
+
+            if (!recognition) {
+                alert("Speech recognition not supported on this browser/device.");
+                return;
+            }
+
+            recognition.start();
+
+            recognition.onresult = (event) => {
+                const spokenText = event.results[0][0].transcript.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"");
+                const targetText = currentData.line.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"");
+
+                // Basic string matching check
+                if (spokenText.includes(targetText) || targetText.includes(spokenText) || similarity(spokenText, targetText) > 0.6) {
+                    document.getElementById('status').textContent = "✅ Correct!";
+                    currentLineIndex++;
+                    setTimeout(nextLine, 1000);
+                } else {
+                    document.getElementById('status').textContent = "❌ Try again. You said: '" + spokenText + "'";
+                    setTimeout(() => { recognition.start(); document.getElementById('status').textContent = "Listening..."; }, 2000);
+                }
+            };
+
+            recognition.onerror = (err) => {
+                if (err.error === 'no-speech') {
+                    recognition.start(); // Keep listening if user paused too long
+                }
+            };
+        }
+    }
+
+    // Helper for fuzzy string matching
+    function similarity(s1, s2) {
+        let longer = s1; let shorter = s2;
+        if (s1.length < s2.length) { longer = s2; shorter = s1; }
+        let longerLength = longer.length;
+        if (longerLength == 0) { return 1.0; }
+        return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
+    }
+
+    function editDistance(s1, s2) {
+        s1 = s1.toLowerCase(); s2 = s2.toLowerCase();
+        let costs = new Array();
+        for (let i = 0; i <= s1.length; i++) {
+            let lastValue = i;
+            for (let j = 0; j <= s2.length; j++) {
+                if (i == 0) costs[j] = j;
+                else {
+                    if (j > 0) {
+                        let newValue = costs[j - 1];
+                        if (s1.charAt(i - 1) != s2.charAt(j - 1))
+                            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+                        costs[j - 1] = lastValue;
+                        lastValue = newValue;
+                    }
+                }
+            }
+            if (i > 0) costs[s2.length] = lastValue;
+        }
+        return costs[s2.length];
+    }
+</script>
+
+</body>
